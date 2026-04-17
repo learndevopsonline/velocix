@@ -12,7 +12,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const tokenURL = "https://github.com/settings/tokens/new?scopes=repo,read:org,actions&description=Velocix"
+func tokenURL(baseURL string) string {
+	host := "https://github.com"
+	if baseURL != "" {
+		host = strings.TrimRight(baseURL, "/")
+	}
+	return host + "/settings/tokens/new?scopes=repo,read:org,actions&description=Velocix"
+}
 
 var configCmd = &cobra.Command{
 	Use:   "config",
@@ -33,8 +39,8 @@ var configAddCmd = &cobra.Command{
 
 var configRemoveCmd = &cobra.Command{
 	Use:   "remove [name]",
-	Short: "Remove a configured organization",
-	Args:  cobra.ExactArgs(1),
+	Short: "Remove a configured organization (use --all to remove everything)",
+	Args:  cobra.MaximumNArgs(1),
 	RunE:  runConfigRemove,
 }
 
@@ -60,6 +66,7 @@ var configShowCmd = &cobra.Command{
 func init() {
 	configCmd.AddCommand(configInitCmd)
 	configCmd.AddCommand(configAddCmd)
+	configRemoveCmd.Flags().BoolP("all", "a", false, "Remove all organizations and reset config")
 	configCmd.AddCommand(configRemoveCmd)
 	configCmd.AddCommand(configListCmd)
 	configCmd.AddCommand(configUseCmd)
@@ -130,26 +137,22 @@ func runConfigAdd(cmd *cobra.Command, args []string) error {
 	fmt.Println("  ─────────────────────────────────────")
 	fmt.Println()
 
-	fmt.Print("  Display name (e.g. work, personal): ")
-	name := readLine()
-	if name == "" {
-		return fmt.Errorf("name is required")
-	}
-
-	fmt.Print("  GitHub organization: ")
-	org := readLine()
-	if org == "" {
-		return fmt.Errorf("organization is required")
+	fmt.Println("  For GitHub Enterprise, enter your server URL (e.g. https://github.example.com)")
+	fmt.Print("  GitHub URL [https://github.com]: ")
+	baseURL := readLine()
+	if baseURL == "https://github.com" {
+		baseURL = ""
 	}
 
 	fmt.Println()
 	fmt.Println("  Velocix needs a token with scopes: repo, read:org, actions")
-	opened := tryOpenBrowser(tokenURL)
+	tURL := tokenURL(baseURL)
+	opened := tryOpenBrowser(tURL)
 	if opened {
 		fmt.Println("  Browser opened to create a new token.")
 	} else {
 		fmt.Println("  Open this URL to create a token:")
-		fmt.Printf("  %s\n", tokenURL)
+		fmt.Printf("  %s\n", tURL)
 	}
 	fmt.Println()
 	fmt.Print("  GitHub Token: ")
@@ -162,11 +165,16 @@ func runConfigAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
-	fmt.Println("  For GitHub Enterprise, enter your server URL (e.g. https://github.example.com)")
-	fmt.Print("  GitHub URL [https://github.com]: ")
-	baseURL := readLine()
-	if baseURL == "https://github.com" {
-		baseURL = ""
+	fmt.Print("  GitHub organization: ")
+	org := readLine()
+	if org == "" {
+		return fmt.Errorf("organization is required")
+	}
+
+	fmt.Print("  Display name (e.g. work, personal): ")
+	name := readLine()
+	if name == "" {
+		return fmt.Errorf("name is required")
 	}
 
 	orgCfg := config.OrgConfig{
@@ -196,6 +204,23 @@ func runConfigAdd(cmd *cobra.Command, args []string) error {
 }
 
 func runConfigRemove(cmd *cobra.Command, args []string) error {
+	all, _ := cmd.Flags().GetBool("all")
+
+	if all {
+		cfg := config.DefaultConfig()
+		cfg.Orgs = nil
+		cfg.ActiveOrg = ""
+		if err := cfg.Save(); err != nil {
+			return err
+		}
+		fmt.Println("All organizations removed. Config reset to defaults.")
+		return nil
+	}
+
+	if len(args) == 0 {
+		return fmt.Errorf("provide an org name or use --all to remove everything")
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -245,18 +270,29 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("  ─────────────────────────────────────")
 	fmt.Println()
 
-	fmt.Println("  Step 1: GitHub Personal Access Token")
+	fmt.Println("  Step 1: GitHub URL")
+	fmt.Println()
+	fmt.Println("  For GitHub Enterprise, enter your server URL (e.g. https://github.example.com)")
+	fmt.Print("  GitHub URL [https://github.com]: ")
+	baseURL := readLine()
+	if baseURL == "https://github.com" {
+		baseURL = ""
+	}
+
+	fmt.Println()
+	fmt.Println("  Step 2: GitHub Personal Access Token")
 	fmt.Println()
 	fmt.Println("  Velocix needs a token with these scopes: repo, read:org, actions")
 	fmt.Println()
 
-	opened := tryOpenBrowser(tokenURL)
+	tURL := tokenURL(baseURL)
+	opened := tryOpenBrowser(tURL)
 	if opened {
 		fmt.Println("  Your browser has been opened to create a new token.")
 	} else {
 		fmt.Println("  Open this URL to create a new token:")
 		fmt.Println()
-		fmt.Printf("  %s\n", tokenURL)
+		fmt.Printf("  %s\n", tURL)
 	}
 
 	fmt.Println()
@@ -274,23 +310,12 @@ func runConfigInit(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
-
-	fmt.Println("  Step 2: GitHub Organization")
+	fmt.Println("  Step 3: GitHub Organization")
 	fmt.Println()
 	fmt.Print("  Organization name: ")
 	org := readLine()
 	if org == "" {
 		return fmt.Errorf("organization cannot be empty")
-	}
-
-	fmt.Println()
-	fmt.Println("  Step 3: GitHub URL")
-	fmt.Println()
-	fmt.Println("  For GitHub Enterprise, enter your server URL (e.g. https://github.example.com)")
-	fmt.Print("  GitHub URL [https://github.com]: ")
-	baseURL := readLine()
-	if baseURL == "https://github.com" {
-		baseURL = ""
 	}
 
 	fmt.Println()

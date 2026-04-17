@@ -106,6 +106,9 @@ func (c *Config) migrateFromLegacy() {
 		if c.ActiveOrg == "" {
 			c.ActiveOrg = c.Organization
 		}
+		// Clear legacy fields so they don't get written back
+		c.GitHubToken = ""
+		c.Organization = ""
 	}
 }
 
