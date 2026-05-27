@@ -73,6 +73,9 @@ func runServe(cmd *cobra.Command, args []string) error {
 	logger.Info("starting web server", "port", cfg.WebPort, "orgs", len(cfg.Orgs))
 	fmt.Fprintf(os.Stderr, "Velocix dashboard: http://localhost:%d\n", cfg.WebPort)
 
+	writePidFile(cfg.DataDir, os.Args)
+	defer removePidFile(cfg.DataDir)
+
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
 	}

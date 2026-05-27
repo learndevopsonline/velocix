@@ -28,6 +28,12 @@ func NewServer(mgr *manager.Manager, port int, logger *slog.Logger) *http.Server
 	mux.HandleFunc("GET /api/orgs", handleListOrgs(mgr))
 	mux.HandleFunc("POST /api/orgs/active", handleSetActiveOrg(mgr))
 
+	// Sync mode + rate limit
+	mux.HandleFunc("GET /api/sync-mode", handleGetSyncMode(mgr))
+	mux.HandleFunc("POST /api/sync-mode", handleSetSyncMode(mgr))
+	mux.HandleFunc("POST /api/sync", handleTriggerSync(mgr))
+	mux.HandleFunc("GET /api/rate-limit", handleRateLimit(mgr))
+
 	// YACD pipeline endpoints
 	mux.HandleFunc("GET /api/pipelines", handleListPipelines(mgr, logger))
 	mux.HandleFunc("GET /api/pipelines/detail", handleGetPipeline(mgr, logger))
@@ -126,6 +132,41 @@ func handleSetActiveOrg(mgr *manager.Manager) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, map[string]string{"active": mgr.GetActiveOrg()})
+	}
+}
+
+// --- Sync mode + rate limit handlers ---
+
+func handleGetSyncMode(mgr *manager.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]string{"mode": mgr.GetSyncMode()})
+	}
+}
+
+func handleSetSyncMode(mgr *manager.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Mode string `json:"mode"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, `{"error":"invalid body"}`, http.StatusBadRequest)
+			return
+		}
+		mgr.SetSyncMode(body.Mode)
+		writeJSON(w, map[string]string{"mode": mgr.GetSyncMode()})
+	}
+}
+
+func handleTriggerSync(mgr *manager.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		mgr.TriggerSyncAll(context.Background())
+		writeJSON(w, map[string]string{"status": "triggered"})
+	}
+}
+
+func handleRateLimit(mgr *manager.Manager) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, mgr.GetRateLimit())
 	}
 }
 

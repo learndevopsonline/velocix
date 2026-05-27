@@ -20,5 +20,6 @@ func init() {
 	rootCmd.AddCommand(serveCmd)
 	rootCmd.AddCommand(tuiCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(upgradeCmd)
 	rootCmd.Version = Version
 }

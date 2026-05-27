@@ -45,6 +45,12 @@ func New(ctx context.Context, cfg *config.Config, logger *slog.Logger) *Manager 
 		m.startOrg(orgCfg)
 	}
 
+	// Apply persisted sync mode to all pollers
+	manual := cfg.SyncMode == "manual"
+	for _, inst := range m.instances {
+		inst.Poller.SetMode(manual)
+	}
+
 	return m
 }
 
@@ -102,6 +108,63 @@ func (m *Manager) GetActiveOrgConfig() *config.OrgConfig {
 
 func (m *Manager) Runner() *yacd.Runner {
 	return m.runner
+}
+
+func (m *Manager) GetSyncMode() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.cfg.SyncMode == "manual" {
+		return "manual"
+	}
+	return "auto"
+}
+
+func (m *Manager) SetSyncMode(mode string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if mode != "auto" && mode != "manual" {
+		mode = "auto"
+	}
+	m.cfg.SyncMode = mode
+	m.cfg.Save()
+	manual := mode == "manual"
+	for _, inst := range m.instances {
+		inst.Poller.SetMode(manual)
+	}
+}
+
+func (m *Manager) GetRateLimit() map[string]any {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	per := map[string]gh.RateLimit{}
+	var worst gh.RateLimit
+	for _, inst := range m.instances {
+		rl := inst.Client.GetRateLimit()
+		per[inst.Config.Name] = rl
+		// "Worst" = lowest remaining where limit is known
+		if rl.Limit > 0 {
+			if worst.Limit == 0 || rl.Remaining < worst.Remaining {
+				worst = rl
+			}
+		}
+	}
+	return map[string]any{
+		"worst":   worst,
+		"per_org": per,
+	}
+}
+
+func (m *Manager) TriggerSyncAll(ctx context.Context) {
+	m.mu.RLock()
+	pollers := make([]*poller.Poller, 0, len(m.instances))
+	for _, inst := range m.instances {
+		pollers = append(pollers, inst.Poller)
+	}
+	m.mu.RUnlock()
+
+	for _, p := range pollers {
+		go p.RunOnce(ctx)
+	}
 }
 
 func (m *Manager) GetActiveOrg() string {

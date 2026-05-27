@@ -78,8 +78,55 @@
     display: inline-block;
     animation: pulse 2s infinite;
   }
+  .live-dot.paused { background: var(--color-fg-subtle); animation: none; }
   @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Rate limit pill */
+  .rl-pill {
+    font-size: 11px; padding: 2px 8px; border-radius: 2em;
+    border: 1px solid var(--color-border-default);
+    color: var(--color-fg-muted); white-space: nowrap;
+    display: none;
+  }
+  .rl-pill.visible { display: inline-block; }
+  .rl-pill.rl-ok { color: var(--color-success-fg); border-color: rgba(63,185,80,0.3); background: rgba(63,185,80,0.08); }
+  .rl-pill.rl-warn { color: var(--color-attention-fg); border-color: rgba(210,153,34,0.4); background: rgba(210,153,34,0.1); }
+  .rl-pill.rl-exceeded { color: var(--color-danger-fg); border-color: rgba(248,81,73,0.4); background: rgba(248,81,73,0.12); }
+
+  /* Sync mode toggle in sidebar */
+  .SyncMode { padding: 12px 16px; border-bottom: 1px solid var(--color-border-default); }
+  .sync-toggle {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 8px; font-size: 13px; cursor: pointer;
+  }
+  .sync-toggle input[type="checkbox"] {
+    appearance: none; width: 32px; height: 18px;
+    background: var(--color-btn-bg); border: 1px solid var(--color-border-default);
+    border-radius: 9px; position: relative; cursor: pointer; transition: background 0.2s;
+    flex-shrink: 0;
+  }
+  .sync-toggle input[type="checkbox"]::after {
+    content: ''; position: absolute; top: 2px; left: 2px;
+    width: 12px; height: 12px; border-radius: 50%; background: var(--color-fg-muted);
+    transition: transform 0.2s;
+  }
+  .sync-toggle input[type="checkbox"]:checked {
+    background: var(--color-accent-emphasis); border-color: var(--color-accent-emphasis);
+  }
+  .sync-toggle input[type="checkbox"]:checked::after {
+    transform: translateX(14px); background: #fff;
+  }
+  .sync-btn {
+    width: 100%; padding: 6px 12px; font-size: 13px; font-family: inherit;
+    color: var(--color-fg-default); background: var(--color-btn-bg);
+    border: 1px solid var(--color-border-default); border-radius: 6px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px;
+  }
+  .sync-btn:hover { background: var(--color-btn-hover-bg); border-color: var(--color-accent-fg); }
+  .sync-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .sync-btn svg { fill: currentColor; }
+  .sync-btn.spinning svg { animation: spin 1s linear infinite; }
 
   /* Layout */
   .Layout {
@@ -456,14 +503,15 @@
     <svg width="28" height="28" viewBox="0 0 100 100" fill="none"><defs><linearGradient id="vlogo" x1="0" y1="0" x2="100" y2="100"><stop offset="0%" stop-color="#58a6ff"/><stop offset="100%" stop-color="#3fb950"/></linearGradient></defs><circle cx="50" cy="50" r="46" stroke="url(#vlogo)" stroke-width="5" fill="none"/><path d="M28 30 L50 72 L72 30" stroke="url(#vlogo)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" fill="none"/><line x1="18" y1="50" x2="34" y2="50" stroke="#58a6ff" stroke-width="4" stroke-linecap="round" opacity="0.6"/><line x1="15" y1="38" x2="28" y2="38" stroke="#58a6ff" stroke-width="3" stroke-linecap="round" opacity="0.4"/><line x1="15" y1="62" x2="28" y2="62" stroke="#58a6ff" stroke-width="3" stroke-linecap="round" opacity="0.4"/></svg>
     Velocix
   </a>
-  <div style="display:flex;align-items:center;gap:20px;">
+  <div style="display:flex;align-items:center;gap:16px;">
     <a href="/trigger" style="color:var(--color-fg-muted);text-decoration:none;font-size:14px;padding:4px 10px;border:1px solid var(--color-border-default);border-radius:6px;display:flex;align-items:center;gap:5px;">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M4 2l10 6-10 6z"/></svg>
       Trigger
     </a>
+    <div id="rate-limit-pill" class="rl-pill rl-ok" title="GitHub API rate limit"></div>
     <div class="AppHeader-meta">
-      <span class="live-dot"></span>
-      Live &middot; <span id="last-update">--</span>
+      <span class="live-dot" id="live-dot"></span>
+      <span id="live-label">Live</span> &middot; <span id="last-update">--</span>
     </div>
   </div>
 </header>
@@ -477,6 +525,19 @@
     <div class="OrgSwitcher">
       <div class="Sidebar-heading">Organization</div>
       <select class="org-select" id="org-select" onchange="switchOrg(this.value)"></select>
+    </div>
+
+    <!-- Sync Mode -->
+    <div class="SyncMode">
+      <div class="Sidebar-heading">Sync</div>
+      <label class="sync-toggle">
+        <input type="checkbox" id="sync-toggle" onchange="onSyncToggle()">
+        <span id="sync-label">Auto sync (60s)</span>
+      </label>
+      <button class="sync-btn" id="sync-btn" onclick="triggerSync()" style="display:none;">
+        <svg width="14" height="14" viewBox="0 0 16 16"><path d="M8 3a5 5 0 0 1 4.546 2.914.751.751 0 1 0 1.357-.643A6.5 6.5 0 0 0 1.5 8H.75a.75.75 0 0 0-.53 1.28l2 2a.75.75 0 0 0 1.06 0l2-2a.75.75 0 0 0-.53-1.28H3a5 5 0 0 1 5-5zm0 10a5 5 0 0 1-4.546-2.914.751.751 0 1 0-1.357.643A6.5 6.5 0 0 0 14.5 8h.75a.75.75 0 0 0 .53-1.28l-2-2a.75.75 0 0 0-1.06 0l-2 2a.75.75 0 0 0 .53 1.28H13a5 5 0 0 1-5 5z"/></svg>
+        <span id="sync-btn-label">Sync now</span>
+      </button>
     </div>
 
     <!-- Status Filter (multi-select) -->
@@ -914,7 +975,112 @@ function refreshAll() {
   fetchRuns();
   fetchStats();
   fetchFilters();
+  fetchRateLimit();
 }
+
+/* --- Sync mode --- */
+let syncManual = false;
+
+async function fetchSyncMode() {
+  try {
+    const resp = await fetch('/api/sync-mode');
+    const data = await resp.json();
+    syncManual = data.mode === 'manual';
+    applySyncModeUI();
+  } catch(e) {}
+}
+
+function applySyncModeUI() {
+  document.getElementById('sync-toggle').checked = !syncManual;
+  document.getElementById('sync-label').textContent = syncManual ? 'Manual sync' : 'Auto sync (60s)';
+  document.getElementById('sync-btn').style.display = syncManual ? 'flex' : 'none';
+  document.getElementById('live-dot').classList.toggle('paused', syncManual);
+  document.getElementById('live-label').textContent = syncManual ? 'Manual' : 'Live';
+}
+
+async function onSyncToggle() {
+  const checked = document.getElementById('sync-toggle').checked;
+  const mode = checked ? 'auto' : 'manual';
+  try {
+    await fetch('/api/sync-mode', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({mode})
+    });
+    syncManual = !checked;
+    applySyncModeUI();
+  } catch(e) {}
+}
+
+async function triggerSync() {
+  const btn = document.getElementById('sync-btn');
+  const lbl = document.getElementById('sync-btn-label');
+  btn.disabled = true;
+  btn.classList.add('spinning');
+  lbl.textContent = 'Syncing...';
+  try {
+    await fetch('/api/sync', {method: 'POST'});
+    setTimeout(() => { refreshAll(); }, 1500);
+  } catch(e) {}
+  setTimeout(() => {
+    btn.disabled = false;
+    btn.classList.remove('spinning');
+    lbl.textContent = 'Sync now';
+  }, 2000);
+}
+
+/* --- Rate limit display --- */
+async function fetchRateLimit() {
+  try {
+    const resp = await fetch('/api/rate-limit');
+    const data = await resp.json();
+    renderRateLimit(data.worst || {});
+  } catch(e) {}
+}
+
+function renderRateLimit(rl) {
+  const pill = document.getElementById('rate-limit-pill');
+  if (!rl || !rl.limit) {
+    pill.classList.remove('visible');
+    return;
+  }
+  pill.classList.add('visible');
+  pill.className = 'rl-pill visible';
+
+  const remaining = rl.remaining || 0;
+  const limit = rl.limit;
+  const pct = remaining / limit;
+
+  let cls = 'rl-ok';
+  let text = remaining + ' / ' + limit;
+
+  if (rl.exceeded) {
+    cls = 'rl-exceeded';
+    text = 'Rate limit exceeded — resets in ' + timeUntil(rl.reset_at);
+  } else if (pct < 0.1) {
+    cls = 'rl-warn';
+    text = remaining + ' / ' + limit + ' — resets in ' + timeUntil(rl.reset_at);
+  } else if (pct < 0.5) {
+    cls = 'rl-warn';
+    text = remaining + ' / ' + limit;
+  }
+  pill.className = 'rl-pill visible ' + cls;
+  pill.textContent = 'API: ' + text;
+  pill.title = 'GitHub API: ' + remaining + ' of ' + limit + ' remaining\nResets: ' + new Date(rl.reset_at).toLocaleString();
+}
+
+function timeUntil(dateStr) {
+  const ms = new Date(dateStr) - new Date();
+  if (ms <= 0) return '0s';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return s + 's';
+  const m = Math.floor(s / 60);
+  if (m < 60) return m + 'm ' + (s % 60) + 's';
+  const h = Math.floor(m / 60);
+  return h + 'h ' + (m % 60) + 'm';
+}
+
+fetchSyncMode();
 
 // Init
 refreshAll();

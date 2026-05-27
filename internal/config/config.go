@@ -36,6 +36,7 @@ type Config struct {
 	PollInterval time.Duration `yaml:"poll_interval"`
 	WebPort      int           `yaml:"web_port"`
 	DataDir      string        `yaml:"data_dir"`
+	SyncMode     string        `yaml:"sync_mode,omitempty"` // "auto" or "manual"
 
 	// Legacy single-org fields (still supported for backward compat)
 	GitHubToken  string `yaml:"github_token,omitempty"`
@@ -53,9 +54,10 @@ func DefaultConfigPath() string {
 
 func DefaultConfig() *Config {
 	return &Config{
-		PollInterval: 30 * time.Second,
+		PollInterval: 60 * time.Second,
 		WebPort:      8080,
 		DataDir:      DefaultConfigDir(),
+		SyncMode:     "auto",
 	}
 }
 

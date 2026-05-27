@@ -22,11 +22,23 @@ const (
 	perPage        = 100
 )
 
+type RateLimit struct {
+	Limit     int       `json:"limit"`
+	Remaining int       `json:"remaining"`
+	Used      int       `json:"used"`
+	ResetAt   time.Time `json:"reset_at"`
+	Exceeded  bool      `json:"exceeded"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type Client struct {
 	gh         *github.Client
 	httpClient *http.Client
 	graphqlURL string
 	logger     *slog.Logger
+
+	rlMu sync.RWMutex
+	rl   RateLimit
 }
 
 func NewClient(token string, baseURL string, logger *slog.Logger) *Client {
@@ -57,6 +69,69 @@ func NewClient(token string, baseURL string, logger *slog.Logger) *Client {
 
 func (c *Client) HTTPClient() *http.Client { return c.httpClient }
 func (c *Client) GraphQLURL() string       { return c.graphqlURL }
+
+func (c *Client) GetRateLimit() RateLimit {
+	c.rlMu.RLock()
+	defer c.rlMu.RUnlock()
+	return c.rl
+}
+
+func (c *Client) updateRateLimitFromGoGithub(r *github.Response) {
+	if r == nil {
+		return
+	}
+	c.rlMu.Lock()
+	c.rl = RateLimit{
+		Limit:     r.Rate.Limit,
+		Remaining: r.Rate.Remaining,
+		Used:      r.Rate.Limit - r.Rate.Remaining,
+		ResetAt:   r.Rate.Reset.Time,
+		Exceeded:  r.Rate.Remaining == 0 && !r.Rate.Reset.Time.IsZero() && time.Now().Before(r.Rate.Reset.Time),
+		UpdatedAt: time.Now(),
+	}
+	c.rlMu.Unlock()
+}
+
+func (c *Client) updateRateLimitFromHeaders(h http.Header) {
+	if h == nil {
+		return
+	}
+	limit := parseHeaderInt(h.Get("X-RateLimit-Limit"))
+	remaining := parseHeaderInt(h.Get("X-RateLimit-Remaining"))
+	used := parseHeaderInt(h.Get("X-RateLimit-Used"))
+	resetUnix := parseHeaderInt(h.Get("X-RateLimit-Reset"))
+	if limit == 0 && remaining == 0 && resetUnix == 0 {
+		return // not present
+	}
+	var resetAt time.Time
+	if resetUnix > 0 {
+		resetAt = time.Unix(int64(resetUnix), 0)
+	}
+	c.rlMu.Lock()
+	c.rl = RateLimit{
+		Limit:     limit,
+		Remaining: remaining,
+		Used:      used,
+		ResetAt:   resetAt,
+		Exceeded:  remaining == 0 && !resetAt.IsZero() && time.Now().Before(resetAt),
+		UpdatedAt: time.Now(),
+	}
+	c.rlMu.Unlock()
+}
+
+func parseHeaderInt(s string) int {
+	if s == "" {
+		return 0
+	}
+	n := 0
+	for _, ch := range s {
+		if ch < '0' || ch > '9' {
+			return 0
+		}
+		n = n*10 + int(ch-'0')
+	}
+	return n
+}
 
 func (c *Client) FetchAllWorkflowRuns(ctx context.Context, org string) ([]model.WorkflowRun, error) {
 	repos, err := c.listActiveRepos(ctx, org)
@@ -160,6 +235,8 @@ func (c *Client) listActiveRepos(ctx context.Context, org string) ([]string, err
 			return nil, fmt.Errorf("graphql request: %w", err)
 		}
 
+		c.updateRateLimitFromHeaders(resp.Header)
+
 		respBody, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
@@ -208,6 +285,9 @@ func (c *Client) fetchRepoRuns(ctx context.Context, owner, repo string) ([]model
 
 	for {
 		result, resp, err := c.gh.Actions.ListRepositoryWorkflowRuns(ctx, owner, repo, opts)
+		if resp != nil {
+			c.updateRateLimitFromGoGithub(resp)
+		}
 		if err != nil {
 			return nil, err
 		}
