@@ -16,7 +16,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const releasesAPI = "https://api.github.com/repos/learndevopsonline/velocix/releases/latest"
+const releasesAPI = "https://api.github.com/repos/millwrights/velocix/releases/latest"
 
 var upgradeCmd = &cobra.Command{
 	Use:   "upgrade",
